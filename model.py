@@ -10,7 +10,7 @@ from tensorflow.keras.callbacks import EarlyStopping
 # ==============================
 # STEP 2. データ準備
 # ==============================
-train_dir = "/dataset/train"
+train_dir = "dataset/train"
 
 datagen = ImageDataGenerator(
     rescale=1./255,        # 正規化
