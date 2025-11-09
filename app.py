@@ -188,6 +188,97 @@ elif mode == "classify":
     print(classes[class_id])
     print(conf)
 
+elif mode == "camera":
+    # パラメータ
+    random.seed(42)
+    colors = {cls_id: (random.randint(0,255), random.randint(0,255), random.randint(0,255))
+            for cls_id in range(len(classes))}
+    threshold = 0.9        # CNN検出確率閾値
+    min_size = 32          # 小さい領域は無視
+    window_size = (80, 80) # スライディングウィンドウサイズ
+    step_size = 32          # ウィンドウ移動幅
+
+    cap = cv2.VideoCapture(0)
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        img_hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+        # --- 1. 色で候補領域抽出 ---
+        # 赤色
+        lower_red1 = np.array([0, 100, 100])
+        upper_red1 = np.array([10, 255, 255])
+        lower_red2 = np.array([160, 100, 100])
+        upper_red2 = np.array([179, 255, 255])
+        mask_red = cv2.bitwise_or(cv2.inRange(img_hsv, lower_red1, upper_red1),
+                                cv2.inRange(img_hsv, lower_red2, upper_red2))
+
+        # 青色
+        lower_blue = np.array([100, 130, 60])
+        upper_blue = np.array([140, 255, 255])
+        mask_blue = cv2.inRange(img_hsv, lower_blue, upper_blue)
+
+        # 黄色
+        lower_yellow = np.array([20, 100, 100])
+        upper_yellow = np.array([30, 255, 255])
+        mask_yellow = cv2.inRange(img_hsv, lower_yellow, upper_yellow)
+
+        # 全色マスクを統合
+        mask = cv2.bitwise_or(mask_red, cv2.bitwise_or(mask_blue, mask_yellow))
+    
+        # モルフォロジー処理
+        kernel = np.ones((3, 3), np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)  # 収縮処理
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1) # 膨張処理
+
+        # 輪郭抽出
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        # --- 2. 候補領域ごとにスライディングウィンドウ + CNN分類 ---
+        for cnt in contours:
+            x, y, w, h = cv2.boundingRect(cnt)
+            if w < min_size or h < min_size:
+                continue
+            aspect_ratio = w / h
+            if aspect_ratio < 0.3 or aspect_ratio > 1.6:
+                continue
+
+            roi = frame[y:y+h, x:x+w]
+
+            # BGR -> RGBに変換
+            roi_rgb = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
+
+            # CNN入力サイズへリサイズして正規化
+            roi_resized = cv2.resize(roi_rgb, (64, 64))
+            roi_input = roi_resized / 255.0
+            roi_input = np.expand_dims(roi_input, axis=0)
+
+            # 推論
+            pred = model.predict(roi_input, verbose=0)
+            conf = pred.max()
+            cls_id = pred.argmax()
+
+            # しきい値を満たす場合のみ描画
+            if conf > threshold:
+                color = colors[cls_id]
+                label = f"{classes[cls_id]} {conf*100:.1f}%"
+
+                cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
+                cv2.rectangle(frame, (x, y-20), (x+w, y), color, -1)
+                cv2.putText(frame, label, (x+5, y-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
+
+        # 結果を画面に表示  
+        cv2.imshow("Traffic Sign Detection", frame)
+
+        # qキーで終了
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()    
+
 else:
     print("モードが正しくありません。image または camera を入力してください。")
 
